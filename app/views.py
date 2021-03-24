@@ -4,14 +4,33 @@ Jinja2 Documentation:    http://jinja.pocoo.org/2/documentation/
 Werkzeug Documentation:  http://werkzeug.pocoo.org/documentation/
 This file creates your application.
 """
+import os
 
-from app import app
-from flask import render_template, request, redirect, url_for
+from app import app, db
+from flask import render_template, request, redirect, url_for, flash
+from werkzeug.utils import secure_filename
+from flask.helpers import send_from_directory
+
+from app.forms import PropertyForm
+from app.models import PropertyModel
+
+
+# Utility functions
+def get_uploaded_images():
+    """Retrieves uploaded images
+    Args:
+        None
+    Returns:
+        <list> A list of the files in the upload folder
+    """
+    upload_dir = app.config.get('UPLOAD_FOLDER')
+    return sorted(os.listdir(upload_dir))
 
 
 ###
 # Routing for your application.
 ###
+
 
 @app.route('/')
 def home():
@@ -25,11 +44,67 @@ def about():
     return render_template('about.html', name="Mary Jane")
 
 
-###
-# The functions below should be applicable to all Flask apps.
-###
+@app.route('/property', methods=['GET', 'POST'])
+def add_property():
+    form = PropertyForm()
+    if request.method == 'POST' and form.validate_on_submit():
+        # Get form data
+        title = form.property_title.data
+        description = form.description.data
+        no_bedrooms = form.no_bedrooms.data
+        no_bathrooms = form.no_bathrooms.data
+        price = form.price.data
+        location = form.location.data
+        property_type = form.property_type.data
+        photo = form.property_photo.data
 
-# Display Flask WTF errors as Flash messages
+        # Save the photo
+        photo_path = secure_filename(photo.filename)
+        photo.save(os.path.join(app.config['UPLOAD_FOLDER'], photo_path))
+
+        # Store the property to the database
+        property_model = PropertyModel(
+            title, no_bedrooms, no_bathrooms, description,
+            price, location, property_type, photo_path
+        )
+
+        db.session.add(property_model)
+        db.session.commit()
+
+        # Redirect to properties page
+        flash('Saved Property', 'success')
+        return redirect(url_for('get_properties'))
+    else:
+        flash_errors(form)
+    return render_template('property.html', form=form)
+
+
+@ app.route('/properties')
+def get_properties():
+    properties = PropertyModel.query.all()
+    for prop in properties:
+        print(prop.photo)
+    return render_template('properties.html', properties=properties)
+
+
+@ app.route("/property/<property_id>")
+def view_property(property_id):
+    prop = PropertyModel.query.filter_by(id=property_id).first()
+    return render_template("view_property.html", prop=prop)
+
+
+@ app.route('/uploads/<filename>')
+def get_image(filename):
+    rootdir = os.getcwd()
+    return send_from_directory(os.path.join(rootdir, app.config['UPLOAD_FOLDER']), filename)
+
+    ###
+    # The functions below should be applicable to all Flask apps.
+    ###
+
+    # Display Flask WTF errors as Flash messages
+
+
 def flash_errors(form):
     for field, errors in form.errors.items():
         for error in errors:
@@ -38,14 +113,15 @@ def flash_errors(form):
                 error
             ), 'danger')
 
-@app.route('/<file_name>.txt')
+
+@ app.route('/<file_name>.txt')
 def send_text_file(file_name):
     """Send your static text file."""
     file_dot_text = file_name + '.txt'
     return app.send_static_file(file_dot_text)
 
 
-@app.after_request
+@ app.after_request
 def add_header(response):
     """
     Add headers to both force latest IE rendering engine or Chrome Frame,
@@ -57,11 +133,11 @@ def add_header(response):
     return response
 
 
-@app.errorhandler(404)
+@ app.errorhandler(404)
 def page_not_found(error):
     """Custom 404 page."""
     return render_template('404.html'), 404
 
 
 if __name__ == '__main__':
-    app.run(debug=True,host="0.0.0.0",port="8080")
+    app.run(debug=True, host="0.0.0.0", port="8080")
